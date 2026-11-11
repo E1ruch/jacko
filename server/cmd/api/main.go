@@ -28,6 +28,7 @@ import (
 	"jacko/server/internal/messages"
 	messagepg "jacko/server/internal/messages/postgres"
 	"jacko/server/internal/outbox"
+	"jacko/server/internal/presence"
 	"jacko/server/internal/realtime"
 	"jacko/server/internal/sessions"
 	sessionpg "jacko/server/internal/sessions/postgres"
@@ -70,7 +71,7 @@ func run(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.Handle("/", httpapi.New(messageService, auth, metrics))
 	httpapi.RegisterAuth(mux, accounts.NewService(accountpg.NewStore(pool)), auth, metrics)
-	httpapi.RegisterCommunities(mux, communities.NewService(communitypg.NewStore(pool)), auth, metrics)
+	var memberPresence httpapi.MemberPresence
 
 	if endpoint := os.Getenv("JACKO_S3_URL"); endpoint != "" {
 		objects, err := attachments3.New(endpoint, os.Getenv("JACKO_S3_REGION"), os.Getenv("JACKO_S3_BUCKET"),
@@ -98,13 +99,18 @@ func run(ctx context.Context) error {
 
 		hub := realtime.NewHub(metrics)
 		metrics.ObserveQueueDepth(hub.QueuedEvents)
-		broker := realtime.NewRedis(client, os.Getenv("JACKO_REDIS_TOPIC"))
+		topic := os.Getenv("JACKO_REDIS_TOPIC")
+		broker := realtime.NewRedis(client, topic)
+		tracker := presence.NewRedis(client, topic)
+		memberPresence = tracker
 		worker := outbox.NewWorker(pool, broker, metrics)
 		workers.Go(func() { broker.Run(lifetime, hub) })
 		workers.Go(func() { worker.Run(lifetime) })
 		workers.Go(func() { worker.ObserveBacklog(lifetime) })
-		mux.Handle("GET /api/v1/channels/{channel}/events", gateway.New(lifetime, hub, auth, outbox.NewJournal(pool), metrics))
+		mux.Handle("GET /api/v1/channels/{channel}/events", gateway.New(lifetime, hub, auth, outbox.NewJournal(pool), metrics, tracker))
 	}
+
+	httpapi.RegisterCommunities(mux, communities.NewService(communitypg.NewStore(pool)), auth, memberPresence, metrics)
 
 	server := &http.Server{
 		Addr:              address,

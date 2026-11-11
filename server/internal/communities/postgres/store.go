@@ -169,3 +169,42 @@ func storeError(operation string, err error) error {
 	}
 	return fmt.Errorf("%s: %w", operation, err)
 }
+
+func (s *Store) ListMembers(ctx context.Context, userID, guildID, after int64) ([]communities.Member, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT page.user_id, CASE WHEN page.user_id = g.owner_id THEN 'owner' ELSE 'member' END
+		FROM members AS viewer
+		JOIN guilds AS g ON g.id = viewer.guild_id
+		LEFT JOIN LATERAL (
+			SELECT listed.user_id FROM members AS listed
+			WHERE listed.guild_id = viewer.guild_id AND listed.user_id > $3
+			ORDER BY listed.user_id LIMIT $4
+		) AS page ON true
+		WHERE viewer.guild_id = $2 AND viewer.user_id = $1
+		ORDER BY page.user_id
+	`, userID, guildID, after, communities.PageSize+1)
+	if err != nil {
+		return nil, fmt.Errorf("query community members: %w", err)
+	}
+	defer rows.Close()
+	members := make([]communities.Member, 0)
+	authorized := false
+	for rows.Next() {
+		authorized = true
+		var id *int64
+		var role string
+		if err := rows.Scan(&id, &role); err != nil {
+			return nil, fmt.Errorf("scan community member: %w", err)
+		}
+		if id != nil {
+			members = append(members, communities.Member{UserID: *id, Role: role})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read community members: %w", err)
+	}
+	if !authorized {
+		return nil, communities.ErrUnavailable
+	}
+	return members, nil
+}

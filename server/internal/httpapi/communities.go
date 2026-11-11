@@ -10,11 +10,12 @@ import (
 )
 
 type communityAPI struct {
-	service *communities.Service
+	service  *communities.Service
+	presence MemberPresence
 }
 
-func RegisterCommunities(mux *http.ServeMux, service *communities.Service, auth Authenticator, metrics *telemetry.Metrics) {
-	api := communityAPI{service: service}
+func RegisterCommunities(mux *http.ServeMux, service *communities.Service, auth Authenticator, presence MemberPresence, metrics *telemetry.Metrics) {
+	api := communityAPI{service: service, presence: presence}
 	handle := func(pattern, route string, handler func(http.ResponseWriter, *http.Request, int64)) {
 		mux.Handle(pattern, metrics.HTTP(route, withUser(auth, handler)))
 	}
@@ -22,6 +23,7 @@ func RegisterCommunities(mux *http.ServeMux, service *communities.Service, auth 
 	handle("GET /api/v1/guilds", "guild_list", api.listGuilds)
 	handle("POST /api/v1/guilds/{guild}/channels", "channel_create", api.createChannel)
 	handle("GET /api/v1/guilds/{guild}/channels", "channel_list", api.listChannels)
+	handle("GET /api/v1/guilds/{guild}/members", "member_list", api.listMembers)
 	handle("POST /api/v1/guilds/{guild}/invites", "invite_create", api.createInvite)
 	handle("POST /api/v1/invites/redeem", "invite_redeem", api.redeemInvite)
 }

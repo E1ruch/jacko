@@ -24,10 +24,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	"jacko/server/internal/communities"
+	communitypg "jacko/server/internal/communities/postgres"
 	"jacko/server/internal/gateway"
 	"jacko/server/internal/httpapi"
 	"jacko/server/internal/messages"
 	"jacko/server/internal/outbox"
+	"jacko/server/internal/presence"
 	"jacko/server/internal/realtime"
 	"jacko/server/internal/sessions"
 	sessionpg "jacko/server/internal/sessions/postgres"
@@ -54,7 +57,10 @@ func testRealtime(t *testing.T, parent context.Context, pool *pgxpool.Pool, serv
 		cancel()
 		workers.Wait()
 	}()
-	broker := realtime.NewRedis(client, "jacko:test:"+schema)
+	topic := "jacko:test:" + schema
+	broker := realtime.NewRedis(client, topic)
+	tracker := presence.NewRedis(client, topic)
+	communityService := communities.NewService(communitypg.NewStore(pool))
 	publisher := &retryPublisher{broker: broker}
 	metrics := telemetry.New()
 	worker := outbox.NewWorker(pool, publisher, metrics)
@@ -88,7 +94,8 @@ func testRealtime(t *testing.T, parent context.Context, pool *pgxpool.Pool, serv
 
 		mux := http.NewServeMux()
 		mux.Handle("/", httpapi.New(service, auth, metrics))
-		mux.Handle("GET /api/v1/channels/{channel}/events", gateway.New(ctx, hub, auth, outbox.NewJournal(pool), metrics))
+		mux.Handle("GET /api/v1/channels/{channel}/events", gateway.New(ctx, hub, auth, outbox.NewJournal(pool), metrics, tracker))
+		httpapi.RegisterCommunities(mux, communityService, auth, tracker, metrics)
 		server := httptest.NewServer(mux)
 		servers[i] = server
 		defer server.Close()
@@ -180,6 +187,7 @@ func testRealtime(t *testing.T, parent context.Context, pool *pgxpool.Pool, serv
 		measureDelivery(t, ctx, servers, channelRoute, token, 4)
 	}
 	testLifecycle(t, ctx, pool, servers, auth, token, first.Data.ID)
+	testPresence(t, ctx, pool, client, topic, servers, auth, token, communityService)
 }
 
 func waitForMetrics(t *testing.T, ctx context.Context, handler http.Handler, expected ...string) {

@@ -245,6 +245,25 @@ paths:
                 $ref: '#/components/schemas/Channel'
         default:
           $ref: '#/components/responses/Error'
+  /guilds/{guild}/members:
+    parameters:
+      - $ref: '#/components/parameters/Guild'
+    get:
+      operationId: listGuildMembers
+      description: Requires community membership. Online status reflects active WebSocket connections and is omitted when presence is unavailable.
+      parameters:
+        - $ref: '#/components/parameters/After'
+      responses:
+        '200':
+          description: Member page in ascending user ID order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberPage'
+        '404':
+          $ref: '#/components/responses/Error'
+        default:
+          $ref: '#/components/responses/Error'
   /guilds/{guild}/invites:
     parameters:
       - $ref: '#/components/parameters/Guild'
@@ -505,6 +524,29 @@ components:
           $ref: '#/components/schemas/ID'
         name:
           type: string
+    MemberPage:
+      type: object
+      required: [items, presence_available]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/GuildMember'
+        next_after:
+          $ref: '#/components/schemas/ID'
+        presence_available:
+          type: boolean
+    GuildMember:
+      type: object
+      required: [user_id, role]
+      properties:
+        user_id:
+          $ref: '#/components/schemas/ID'
+        role:
+          type: string
+          enum: [owner, member]
+        online:
+          type: boolean
     GuildPage:
       type: object
       required: [items]

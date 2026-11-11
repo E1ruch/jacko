@@ -31,6 +31,11 @@ type Channel struct {
 	Name    string `json:"name"`
 }
 
+type Member struct {
+	UserID int64  `json:"user_id,string"`
+	Role   string `json:"role"`
+}
+
 type CreatedGuild struct {
 	Guild   Guild   `json:"guild"`
 	Channel Channel `json:"channel"`
@@ -46,6 +51,7 @@ type Store interface {
 	ListGuilds(ctx context.Context, userID, after int64) ([]Guild, error)
 	CreateChannel(ctx context.Context, userID, guildID int64, name string) (Channel, error)
 	ListChannels(ctx context.Context, userID, guildID, after int64) ([]Channel, error)
+	ListMembers(ctx context.Context, userID, guildID, after int64) ([]Member, error)
 	CreateInvite(ctx context.Context, userID, guildID int64, tokenHash [32]byte) (time.Time, error)
 	Join(ctx context.Context, userID int64, tokenHash [32]byte) (Guild, error)
 }
@@ -80,6 +86,10 @@ func (s *Service) CreateChannel(ctx context.Context, userID, guildID int64, name
 
 func (s *Service) ListChannels(ctx context.Context, userID, guildID, after int64) ([]Channel, error) {
 	return s.store.ListChannels(ctx, userID, guildID, after)
+}
+
+func (s *Service) ListMembers(ctx context.Context, userID, guildID, after int64) ([]Member, error) {
+	return s.store.ListMembers(ctx, userID, guildID, after)
 }
 
 func (s *Service) CreateInvite(ctx context.Context, userID, guildID int64) (Invite, error) {

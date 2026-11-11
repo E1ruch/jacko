@@ -3,6 +3,7 @@ package gateway
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -34,16 +35,22 @@ type ChannelJournal interface {
 	Read(ctx context.Context, channelID, after, through int64) ([]realtime.Event, error)
 }
 
+type Presence interface {
+	Refresh(ctx context.Context, userID int64, connectionID string) error
+	Disconnect(ctx context.Context, userID int64, connectionID string) error
+}
+
 type Gateway struct {
 	lifetime context.Context
 	hub      *realtime.Hub
 	auth     Authenticator
 	journal  ChannelJournal
 	metrics  *telemetry.Metrics
+	presence Presence
 }
 
-func New(lifetime context.Context, hub *realtime.Hub, auth Authenticator, journal ChannelJournal, metrics *telemetry.Metrics) *Gateway {
-	return &Gateway{lifetime: lifetime, hub: hub, auth: auth, journal: journal, metrics: metrics}
+func New(lifetime context.Context, hub *realtime.Hub, auth Authenticator, journal ChannelJournal, metrics *telemetry.Metrics, presence Presence) *Gateway {
+	return &Gateway{lifetime: lifetime, hub: hub, auth: auth, journal: journal, metrics: metrics, presence: presence}
 }
 
 type identity struct {
@@ -97,6 +104,20 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var connectionID string
+	if g.presence != nil {
+		connectionID = rand.Text()
+		g.refreshPresence(ctx, userID, connectionID)
+		defer g.clearPresence(context.WithoutCancel(ctx), userID, connectionID)
+	}
+
+	readyCtx, readyCancel := context.WithTimeout(ctx, operationTimeout)
+	err = wsjson.Write(readyCtx, conn, cursorFrame{Version: 1, Op: "ready", Cursor: cursor})
+	readyCancel()
+	if err != nil {
+		return
+	}
+
 	g.metrics.WSConnections.Inc()
 	defer g.metrics.WSConnections.Dec()
 
@@ -120,6 +141,9 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-heartbeat.C:
 			cursor, err = g.checkConnection(ctx, conn, request.Token, userID, channelID, cursor)
+			if err == nil && g.presence != nil {
+				g.refreshPresence(ctx, userID, connectionID)
+			}
 		case frame := <-subscription.Events:
 			if frame.Seq <= cursor {
 				continue
@@ -163,7 +187,7 @@ func (g *Gateway) prepare(ctx context.Context, conn *websocket.Conn, userID, cha
 			return 0, err
 		}
 	}
-	return head, wsjson.Write(ctx, conn, cursorFrame{Version: 1, Op: "ready", Cursor: head})
+	return head, nil
 }
 
 func (g *Gateway) deliver(ctx context.Context, conn *websocket.Conn, channelID, cursor int64, frame realtime.Frame) (int64, error) {
@@ -251,4 +275,17 @@ func (g *Gateway) closeForError(ctx context.Context, conn *websocket.Conn, err e
 		slog.Warn("websocket connection interrupted", "error", err)
 		_ = conn.Close(websocket.StatusTryAgainLater, "connection interrupted")
 	}
+}
+
+// Presence is best effort. Lease expiration handles Redis errors and process loss.
+func (g *Gateway) refreshPresence(ctx context.Context, userID int64, connectionID string) {
+	ctx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	defer cancel()
+	_ = g.presence.Refresh(ctx, userID, connectionID)
+}
+
+func (g *Gateway) clearPresence(ctx context.Context, userID int64, connectionID string) {
+	ctx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	defer cancel()
+	_ = g.presence.Disconnect(ctx, userID, connectionID)
 }
