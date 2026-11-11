@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: Jacko API
   version: 0.1.0
-  description: HTTP contract for the implemented account, session and messaging operations.
+  description: HTTP contract for the implemented account, session, community and messaging operations.
 servers:
   - url: /api/v1
 security:
@@ -130,12 +130,148 @@ paths:
                 $ref: '#/components/schemas/Message'
         default:
           $ref: '#/components/responses/Error'
+  /guilds:
+    get:
+      operationId: listGuilds
+      parameters:
+        - $ref: '#/components/parameters/After'
+      responses:
+        '200':
+          description: Communities the caller belongs to, in ascending ID order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuildPage'
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      operationId: createGuild
+      requestBody:
+        $ref: '#/components/requestBodies/Name'
+      responses:
+        '201':
+          description: The community and its default general channel.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [guild, channel]
+                properties:
+                  guild:
+                    $ref: '#/components/schemas/Guild'
+                  channel:
+                    $ref: '#/components/schemas/Channel'
+        default:
+          $ref: '#/components/responses/Error'
+  /guilds/{guild}/channels:
+    parameters:
+      - $ref: '#/components/parameters/Guild'
+    get:
+      operationId: listChannels
+      parameters:
+        - $ref: '#/components/parameters/After'
+      responses:
+        '200':
+          description: Text channels visible to a community member.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelPage'
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      operationId: createChannel
+      description: Requires community ownership.
+      requestBody:
+        $ref: '#/components/requestBodies/Name'
+      responses:
+        '201':
+          description: Created text channel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+        default:
+          $ref: '#/components/responses/Error'
+  /guilds/{guild}/invites:
+    parameters:
+      - $ref: '#/components/parameters/Guild'
+    post:
+      operationId: createInvite
+      description: Requires community ownership. The invitation is reusable for seven days.
+      responses:
+        '201':
+          description: Invitation and expiration time.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, expires_at]
+                properties:
+                  token:
+                    $ref: '#/components/schemas/Token'
+                  expires_at:
+                    type: string
+                    format: date-time
+        default:
+          $ref: '#/components/responses/Error'
+  /invites/redeem:
+    post:
+      operationId: redeemInvite
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [token]
+              properties:
+                token:
+                  $ref: '#/components/schemas/Token'
+      responses:
+        '200':
+          description: Joined community. Repeated redemption by a member returns the same community.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Guild'
+        '404':
+          $ref: '#/components/responses/Error'
+        default:
+          $ref: '#/components/responses/Error'
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
+  parameters:
+    Guild:
+      name: guild
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/ID'
+    After:
+      name: after
+      in: query
+      description: Exclusive ID from the previous page's next_after. Pages contain up to 100 items.
+      schema:
+        $ref: '#/components/schemas/ID'
   requestBodies:
+    Name:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [name]
+            properties:
+              name:
+                type: string
+                minLength: 1
+                maxLength: 80
     Credentials:
       required: true
       content:
@@ -183,6 +319,46 @@ components:
               code:
                 type: string
   schemas:
+    Guild:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          $ref: '#/components/schemas/ID'
+        name:
+          type: string
+        owner_id:
+          $ref: '#/components/schemas/ID'
+    Channel:
+      type: object
+      required: [id, guild_id, name]
+      properties:
+        id:
+          $ref: '#/components/schemas/ID'
+        guild_id:
+          $ref: '#/components/schemas/ID'
+        name:
+          type: string
+    GuildPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Guild'
+        next_after:
+          $ref: '#/components/schemas/ID'
+    ChannelPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Channel'
+        next_after:
+          $ref: '#/components/schemas/ID'
     ID:
       type: string
       pattern: '^[1-9][0-9]{0,18}$'

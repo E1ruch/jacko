@@ -37,6 +37,17 @@ func New(messageService *messages.Service, auth Authenticator, metrics *telemetr
 }
 
 func (a *api) withChannel(next func(http.ResponseWriter, *http.Request, int64, int64)) http.HandlerFunc {
+	return withUser(a.auth, func(w http.ResponseWriter, r *http.Request, userID int64) {
+		channelID, err := strconv.ParseInt(r.PathValue("channel"), 10, 64)
+		if err != nil || channelID <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid_channel")
+			return
+		}
+		next(w, r, userID, channelID)
+	})
+}
+
+func withUser(auth Authenticator, next func(http.ResponseWriter, *http.Request, int64)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		token := bearerToken(r)
@@ -44,7 +55,7 @@ func (a *api) withChannel(next func(http.ResponseWriter, *http.Request, int64, i
 			unauthorized(w)
 			return
 		}
-		userID, err := a.auth.Authenticate(r.Context(), token)
+		userID, err := auth.Authenticate(r.Context(), token)
 		if errors.Is(err, sessions.ErrInvalid) {
 			unauthorized(w)
 			return
@@ -53,13 +64,7 @@ func (a *api) withChannel(next func(http.ResponseWriter, *http.Request, int64, i
 			internalError(w, err)
 			return
 		}
-
-		channelID, err := strconv.ParseInt(r.PathValue("channel"), 10, 64)
-		if err != nil || channelID <= 0 {
-			writeError(w, http.StatusBadRequest, "invalid_channel")
-			return
-		}
-		next(w, r, userID, channelID)
+		next(w, r, userID)
 	}
 }
 

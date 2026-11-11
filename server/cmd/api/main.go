@@ -18,6 +18,8 @@ import (
 
 	"jacko/server/internal/accounts"
 	accountpg "jacko/server/internal/accounts/postgres"
+	"jacko/server/internal/communities"
+	communitypg "jacko/server/internal/communities/postgres"
 	"jacko/server/internal/gateway"
 	"jacko/server/internal/httpapi"
 	"jacko/server/internal/messages"
@@ -65,6 +67,7 @@ func run(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.Handle("/", httpapi.New(messageService, auth, metrics))
 	httpapi.RegisterAuth(mux, accounts.NewService(accountpg.NewStore(pool)), auth, metrics)
+	httpapi.RegisterCommunities(mux, communities.NewService(communitypg.NewStore(pool)), auth, metrics)
 
 	if redisURL := os.Getenv("JACKO_REDIS_URL"); redisURL != "" {
 		options, err := redis.ParseURL(redisURL)
