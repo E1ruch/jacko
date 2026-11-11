@@ -33,6 +33,9 @@ func New(messageService *messages.Service, auth Authenticator, metrics *telemetr
 	})
 	mux.Handle("POST /api/v1/channels/{channel}/messages", metrics.HTTP("message_send", api.withChannel(api.send)))
 	mux.Handle("GET /api/v1/channels/{channel}/messages", metrics.HTTP("message_history", api.withChannel(api.history)))
+	mux.Handle("PATCH /api/v1/channels/{channel}/messages/{message}", metrics.HTTP("message_edit", api.withChannel(api.edit)))
+	mux.Handle("DELETE /api/v1/channels/{channel}/messages/{message}", metrics.HTTP("message_delete", api.withChannel(api.delete)))
+
 	return mux
 }
 
@@ -72,6 +75,7 @@ func (a *api) send(w http.ResponseWriter, r *http.Request, userID, channelID int
 	var body struct {
 		Nonce   string `json:"nonce"`
 		Content string `json:"content"`
+		ReplyTo *int64 `json:"reply_to,string"`
 	}
 	// Allow for JSON escape sequences in the 8 KiB content field.
 	if !readJSON(w, r, 64<<10, &body) {
@@ -79,7 +83,7 @@ func (a *api) send(w http.ResponseWriter, r *http.Request, userID, channelID int
 	}
 
 	message, err := a.messages.Send(r.Context(), messages.SendCommand{
-		AuthorID: userID, ChannelID: channelID, Nonce: body.Nonce, Content: body.Content,
+		AuthorID: userID, ChannelID: channelID, Nonce: body.Nonce, Content: body.Content, ReplyTo: body.ReplyTo,
 	})
 	if err != nil {
 		writeMessageError(w, err)
@@ -166,6 +170,10 @@ func writeMessageError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, "invalid_history")
 	case errors.Is(err, messages.ErrChannelAccess):
 		writeError(w, http.StatusNotFound, "channel_not_found")
+	case errors.Is(err, messages.ErrMessageNotFound):
+		writeError(w, http.StatusNotFound, "message_not_found")
+	case errors.Is(err, messages.ErrReplyNotFound):
+		writeError(w, http.StatusNotFound, "reply_target_not_found")
 	case errors.Is(err, messages.ErrNonceConflict):
 		writeError(w, http.StatusConflict, "nonce_conflict")
 	default:

@@ -87,6 +87,7 @@ func TestCreateTransaction(t *testing.T) {
 	applyMigration(t, ctx, pool, "000004_outbox_pending_age.up.sql")
 	applyMigration(t, ctx, pool, "000005_accounts_and_refresh.up.sql")
 	applyMigration(t, ctx, pool, "000006_communities.up.sql")
+	applyMigration(t, ctx, pool, "000007_message_lifecycle.up.sql")
 
 	service := messages.NewService(postgres.NewStore(pool))
 	t.Run("CursorMigration", func(t *testing.T) {
@@ -95,6 +96,12 @@ func TestCreateTransaction(t *testing.T) {
 		head, err := journal.Head(ctx, 1, channelID)
 		if err != nil || head != 2 {
 			t.Fatalf("legacy cursor: got %d, %v", head, err)
+		}
+		legacy, err := service.Send(ctx, messages.SendCommand{
+			AuthorID: 1, ChannelID: channelID, Nonce: "legacy-first", Content: "first",
+		})
+		if err != nil || legacy.Content != "first" || legacy.ID <= 0 {
+			t.Fatalf("legacy nonce retry: %+v, %v", legacy, err)
 		}
 		if _, err := service.Send(ctx, messages.SendCommand{
 			AuthorID: 1, ChannelID: channelID, Nonce: "after-migration", Content: "third",

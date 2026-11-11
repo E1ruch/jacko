@@ -179,6 +179,7 @@ func testRealtime(t *testing.T, parent context.Context, pool *pgxpool.Pool, serv
 		_ = connections[0].CloseNow()
 		measureDelivery(t, ctx, servers, channelRoute, token, 4)
 	}
+	testLifecycle(t, ctx, pool, servers, auth, token, first.Data.ID)
 }
 
 func waitForMetrics(t *testing.T, ctx context.Context, handler http.Handler, expected ...string) {

@@ -121,13 +121,65 @@ paths:
                   description: Message text. At most 8192 UTF-8 bytes.
                   minLength: 1
                   maxLength: 8192
+                reply_to:
+                  $ref: '#/components/schemas/ID'
       responses:
         '200':
-          description: Persisted message. A retry with the same nonce and payload returns the same message.
+          description: Persisted message. A retry with the original nonce and payload returns the current version of the same message. A deleted message returns 404.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Message'
+        default:
+          $ref: '#/components/responses/Error'
+  /channels/{channel}/messages/{message}:
+    parameters:
+      - name: channel
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/ID'
+      - name: message
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/ID'
+    patch:
+      operationId: editMessage
+      description: Only the author can edit a live message while a member of its channel.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [content]
+              properties:
+                content:
+                  type: string
+                  description: Updated text. At most 8192 UTF-8 bytes.
+                  minLength: 1
+                  maxLength: 8192
+      responses:
+        '200':
+          description: Current message with its edit timestamp when edited.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+        '404':
+          $ref: '#/components/responses/Error'
+        default:
+          $ref: '#/components/responses/Error'
+    delete:
+      operationId: deleteMessage
+      description: Only the author can delete a message while a member of its channel. Repeated deletion is idempotent.
+      responses:
+        '204':
+          description: Message removed from history.
+        '404':
+          $ref: '#/components/responses/Error'
         default:
           $ref: '#/components/responses/Error'
   /guilds:
@@ -395,6 +447,11 @@ components:
         content:
           type: string
         created_at:
+          type: string
+          format: date-time
+        reply_to:
+          $ref: '#/components/schemas/ID'
+        edited_at:
           type: string
           format: date-time
     HistoryPage:
