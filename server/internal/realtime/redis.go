@@ -69,6 +69,7 @@ func (r *Redis) subscribe(ctx context.Context, hub *Hub) error {
 				hub.Disconnect()
 				hub.Connect()
 			case *redis.Message:
+				receivedAt := time.Now()
 				var route struct {
 					Seq  int64 `json:"seq,string"`
 					Data struct {
@@ -79,7 +80,7 @@ func (r *Redis) subscribe(ctx context.Context, hub *Hub) error {
 					slog.Warn("ignoring malformed realtime event")
 					continue
 				}
-				hub.Deliver(route.Data.ChannelID, Frame{Seq: route.Seq, Payload: []byte(value.Payload)})
+				hub.Deliver(route.Data.ChannelID, Frame{Seq: route.Seq, Payload: []byte(value.Payload), ReceivedAt: receivedAt})
 			}
 		}
 	}

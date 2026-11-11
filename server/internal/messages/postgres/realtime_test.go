@@ -31,6 +31,7 @@ import (
 	"jacko/server/internal/realtime"
 	"jacko/server/internal/sessions"
 	sessionpg "jacko/server/internal/sessions/postgres"
+	"jacko/server/internal/telemetry"
 )
 
 func testRealtime(t *testing.T, parent context.Context, pool *pgxpool.Pool, service *messages.Service, schema string) {
@@ -55,7 +56,10 @@ func testRealtime(t *testing.T, parent context.Context, pool *pgxpool.Pool, serv
 	}()
 	broker := realtime.NewRedis(client, "jacko:test:"+schema)
 	publisher := &retryPublisher{broker: broker}
-	worker := outbox.NewWorker(pool, publisher)
+	metrics := telemetry.New()
+	worker := outbox.NewWorker(pool, publisher, metrics)
+	workers.Go(func() { worker.ObserveBacklog(ctx) })
+	waitForMetrics(t, ctx, metrics.Handler(), "jacko_outbox_probe_ok 1\n")
 	workers.Go(func() { worker.Run(ctx) })
 
 	var channelID int64
@@ -75,14 +79,16 @@ func testRealtime(t *testing.T, parent context.Context, pool *pgxpool.Pool, serv
 	channelRoute := "/api/v1/channels/" + strconv.FormatInt(channelID, 10)
 	var servers [2]*httptest.Server
 	var connections [2]*websocket.Conn
+	var hubs [2]*realtime.Hub
 	for i := range servers {
-		hub := realtime.NewHub()
+		hub := realtime.NewHub(metrics)
+		hubs[i] = hub
 		workers.Go(func() { broker.Run(ctx, hub) })
 		waitForHub(t, ctx, hub, channelID)
 
 		mux := http.NewServeMux()
-		mux.Handle("/", httpapi.New(service, auth))
-		mux.Handle("GET /api/v1/channels/{channel}/events", gateway.New(ctx, hub, auth, outbox.NewJournal(pool)))
+		mux.Handle("/", httpapi.New(service, auth, metrics))
+		mux.Handle("GET /api/v1/channels/{channel}/events", gateway.New(ctx, hub, auth, outbox.NewJournal(pool), metrics))
 		server := httptest.NewServer(mux)
 		servers[i] = server
 		defer server.Close()
@@ -91,6 +97,9 @@ func testRealtime(t *testing.T, parent context.Context, pool *pgxpool.Pool, serv
 		defer connections[i].CloseNow()
 		readReady(t, ctx, connections[i], 0)
 	}
+	metrics.ObserveQueueDepth(func() float64 {
+		return hubs[0].QueuedEvents() + hubs[1].QueuedEvents()
+	})
 
 	if err := sendHTTP(ctx, servers[0], channelRoute, token, "realtime", "retry-once"); err != nil {
 		t.Fatal(err)
@@ -154,11 +163,49 @@ func testRealtime(t *testing.T, parent context.Context, pool *pgxpool.Pool, serv
 	if err := wsjson.Read(ctx, invalidCursor, &reset); err != nil || reset.Op != "resync_required" {
 		t.Fatalf("invalid cursor: %+v, %v", reset, err)
 	}
+	waitForMetrics(t, ctx, metrics.Handler(),
+		`jacko_http_request_duration_seconds_count{code="200",route="message_send"} 4`,
+		`jacko_ws_dispatch_total{mode="live"} 5`,
+		`jacko_ws_dispatch_total{mode="replay"} 3`,
+		"jacko_ws_connections 2\n",
+		"jacko_ws_resync_required_total 1\n",
+		"jacko_ws_live_delivery_seconds_count 5\n",
+		"jacko_ws_queued_events 0\n",
+		"jacko_outbox_publish_failures_total 1\n",
+	)
 
 	if os.Getenv("JACKO_TEST_LOAD") == "1" {
 		_ = resumed.CloseNow()
 		_ = connections[0].CloseNow()
 		measureDelivery(t, ctx, servers, channelRoute, token, 4)
+	}
+}
+
+func waitForMetrics(t *testing.T, ctx context.Context, handler http.Handler, expected ...string) {
+	t.Helper()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		scrape := httptest.NewRecorder()
+		handler.ServeHTTP(scrape, httptest.NewRequest("GET", "/metrics", nil).WithContext(ctx))
+		if scrape.Code != http.StatusOK {
+			t.Fatalf("metrics scrape returned %d", scrape.Code)
+		}
+		body := scrape.Body.String()
+		var missing []string
+		for _, sample := range expected {
+			if !strings.Contains(body, sample) {
+				missing = append(missing, sample)
+			}
+		}
+		if len(missing) == 0 {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("missing metrics samples %q: %v", missing, ctx.Err())
+		case <-ticker.C:
+		}
 	}
 }
 

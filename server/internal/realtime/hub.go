@@ -1,10 +1,15 @@
 // Package realtime routes live events to local channel subscribers.
 package realtime
 
-import "sync"
+import (
+	"sync"
+
+	"jacko/server/internal/telemetry"
+)
 
 type Hub struct {
 	mu        sync.Mutex
+	metrics   *telemetry.Metrics
 	available bool
 	channels  map[int64]map[*subscriber]struct{}
 }
@@ -19,8 +24,20 @@ type subscriber struct {
 	done   chan struct{}
 }
 
-func NewHub() *Hub {
-	return &Hub{channels: make(map[int64]map[*subscriber]struct{})}
+func NewHub(metrics *telemetry.Metrics) *Hub {
+	return &Hub{metrics: metrics, channels: make(map[int64]map[*subscriber]struct{})}
+}
+
+func (h *Hub) QueuedEvents() float64 {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	total := 0
+	for _, subscribers := range h.channels {
+		for subscriber := range subscribers {
+			total += len(subscriber.events)
+		}
+	}
+	return float64(total)
 }
 
 // Disconnect closes existing subscriptions so clients can replay missed events.
@@ -69,6 +86,7 @@ func (h *Hub) Deliver(channelID int64, event Frame) {
 		select {
 		case subscriber.events <- event:
 		default:
+			h.metrics.WSQueueOverflows.Inc()
 			h.remove(channelID, subscriber)
 		}
 	}

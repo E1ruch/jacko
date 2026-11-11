@@ -15,6 +15,7 @@ import (
 	"jacko/server/internal/messages"
 	"jacko/server/internal/realtime"
 	"jacko/server/internal/sessions"
+	"jacko/server/internal/telemetry"
 )
 
 const (
@@ -38,10 +39,11 @@ type Gateway struct {
 	hub      *realtime.Hub
 	auth     Authenticator
 	journal  ChannelJournal
+	metrics  *telemetry.Metrics
 }
 
-func New(lifetime context.Context, hub *realtime.Hub, auth Authenticator, journal ChannelJournal) *Gateway {
-	return &Gateway{lifetime: lifetime, hub: hub, auth: auth, journal: journal}
+func New(lifetime context.Context, hub *realtime.Hub, auth Authenticator, journal ChannelJournal, metrics *telemetry.Metrics) *Gateway {
+	return &Gateway{lifetime: lifetime, hub: hub, auth: auth, journal: journal, metrics: metrics}
 }
 
 type identity struct {
@@ -77,7 +79,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	request, userID, err := g.identify(ctx, conn)
 	if err != nil {
-		closeForError(ctx, conn, err)
+		g.closeForError(ctx, conn, err)
 		return
 	}
 
@@ -91,9 +93,12 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx = conn.CloseRead(ctx)
 	cursor, err := g.prepare(ctx, conn, userID, channelID, request.After)
 	if err != nil {
-		closeForError(ctx, conn, err)
+		g.closeForError(ctx, conn, err)
 		return
 	}
+
+	g.metrics.WSConnections.Inc()
+	defer g.metrics.WSConnections.Dec()
 
 	heartbeat := time.NewTicker(20 * time.Second)
 	defer heartbeat.Stop()
@@ -122,7 +127,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			cursor, err = g.deliver(ctx, conn, channelID, cursor, frame)
 		}
 		if err != nil {
-			closeForError(ctx, conn, err)
+			g.closeForError(ctx, conn, err)
 			return
 		}
 	}
@@ -170,7 +175,12 @@ func (g *Gateway) deliver(ctx context.Context, conn *websocket.Conn, channelID, 
 			return cursor, err
 		}
 	}
-	return frame.Seq, conn.Write(ctx, websocket.MessageText, frame.Payload)
+	if err := conn.Write(ctx, websocket.MessageText, frame.Payload); err != nil {
+		return cursor, err
+	}
+	g.metrics.WSFrames.WithLabelValues("live").Inc()
+	g.metrics.WSLiveDelivery.Observe(time.Since(frame.ReceivedAt).Seconds())
+	return frame.Seq, nil
 }
 
 func (g *Gateway) replay(ctx context.Context, conn *websocket.Conn, channelID, after, through int64) error {
@@ -192,6 +202,7 @@ func (g *Gateway) replay(ctx context.Context, conn *websocket.Conn, channelID, a
 			if err := wsjson.Write(ctx, conn, event); err != nil {
 				return err
 			}
+			g.metrics.WSFrames.WithLabelValues("replay").Inc()
 			after = event.Seq
 		}
 	}
@@ -219,7 +230,7 @@ func (g *Gateway) checkConnection(ctx context.Context, conn *websocket.Conn, tok
 	return head, conn.Ping(ctx)
 }
 
-func closeForError(ctx context.Context, conn *websocket.Conn, err error) {
+func (g *Gateway) closeForError(ctx context.Context, conn *websocket.Conn, err error) {
 	if ctx.Err() != nil {
 		return
 	}
@@ -227,6 +238,7 @@ func closeForError(ctx context.Context, conn *websocket.Conn, err error) {
 	case errors.Is(err, sessions.ErrInvalid), errors.Is(err, messages.ErrChannelAccess):
 		_ = conn.Close(websocket.StatusPolicyViolation, "subscription denied")
 	case errors.Is(err, errResync):
+		g.metrics.WSResyncs.Inc()
 		ctx, cancel := context.WithTimeout(ctx, operationTimeout)
 		defer cancel()
 		if wsjson.Write(ctx, conn, struct {

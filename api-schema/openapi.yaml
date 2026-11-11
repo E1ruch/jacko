@@ -1,0 +1,233 @@
+openapi: 3.0.3
+info:
+  title: Jacko API
+  version: 0.1.0
+  description: HTTP contract for the implemented account, session and messaging operations.
+servers:
+  - url: /api/v1
+security:
+  - bearerAuth: []
+paths:
+  /auth/register:
+    post:
+      operationId: registerAccount
+      security: []
+      requestBody:
+        $ref: '#/components/requestBodies/Credentials'
+      responses:
+        '201':
+          $ref: '#/components/responses/UserID'
+        '400':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        default:
+          $ref: '#/components/responses/Error'
+  /auth/login:
+    post:
+      operationId: login
+      security: []
+      requestBody:
+        $ref: '#/components/requestBodies/Credentials'
+      responses:
+        '200':
+          $ref: '#/components/responses/Tokens'
+        default:
+          $ref: '#/components/responses/Error'
+  /auth/refresh:
+    post:
+      operationId: refreshSession
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [refresh_token]
+              properties:
+                refresh_token:
+                  $ref: '#/components/schemas/Token'
+      responses:
+        '200':
+          $ref: '#/components/responses/Tokens'
+        default:
+          $ref: '#/components/responses/Error'
+  /auth/session:
+    get:
+      operationId: getCurrentSession
+      responses:
+        '200':
+          $ref: '#/components/responses/UserID'
+        default:
+          $ref: '#/components/responses/Error'
+    delete:
+      operationId: revokeCurrentSession
+      responses:
+        '204':
+          description: Session revoked.
+        default:
+          $ref: '#/components/responses/Error'
+  /channels/{channel}/messages:
+    parameters:
+      - name: channel
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/ID'
+    get:
+      operationId: listMessages
+      parameters:
+        - name: before
+          in: query
+          description: Exclusive message ID from the previous page's next_before.
+          schema:
+            $ref: '#/components/schemas/ID'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: Page sorted by descending message ID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistoryPage'
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      operationId: sendMessage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [nonce, content]
+              properties:
+                nonce:
+                  type: string
+                  description: Idempotency key scoped to the author. At most 64 UTF-8 bytes.
+                  minLength: 1
+                  maxLength: 64
+                content:
+                  type: string
+                  description: Message text. At most 8192 UTF-8 bytes.
+                  minLength: 1
+                  maxLength: 8192
+      responses:
+        '200':
+          description: Persisted message. A retry with the same nonce and payload returns the same message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+        default:
+          $ref: '#/components/responses/Error'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  requestBodies:
+    Credentials:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [email, password]
+            properties:
+              email:
+                type: string
+                format: email
+                maxLength: 254
+              password:
+                type: string
+                format: password
+                minLength: 1
+                maxLength: 256
+                description: Registration requires at least 12 characters. All operations cap passwords at 256 UTF-8 bytes.
+  responses:
+    UserID:
+      description: User identifier.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [user_id]
+            properties:
+              user_id:
+                $ref: '#/components/schemas/ID'
+    Tokens:
+      description: Access and refresh tokens for the current session.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TokenPair'
+    Error:
+      description: API error with a machine-readable code.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [code]
+            properties:
+              code:
+                type: string
+  schemas:
+    ID:
+      type: string
+      pattern: '^[1-9][0-9]{0,18}$'
+      description: Positive signed 64-bit identifier represented as a decimal string.
+    Token:
+      type: string
+      pattern: '^[0-9a-fA-F]{64}$'
+    TokenPair:
+      type: object
+      required: [user_id, access_token, refresh_token, expires_at, refresh_expires_at]
+      properties:
+        user_id:
+          $ref: '#/components/schemas/ID'
+        access_token:
+          $ref: '#/components/schemas/Token'
+        refresh_token:
+          $ref: '#/components/schemas/Token'
+        expires_at:
+          type: string
+          format: date-time
+        refresh_expires_at:
+          type: string
+          format: date-time
+    Message:
+      type: object
+      required: [id, channel_id, author_id, content, created_at]
+      properties:
+        id:
+          $ref: '#/components/schemas/ID'
+        channel_id:
+          $ref: '#/components/schemas/ID'
+        author_id:
+          $ref: '#/components/schemas/ID'
+        content:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    HistoryPage:
+      type: object
+      required: [messages]
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/Message'
+        next_before:
+          $ref: '#/components/schemas/ID'

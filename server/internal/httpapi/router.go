@@ -13,6 +13,7 @@ import (
 
 	"jacko/server/internal/messages"
 	"jacko/server/internal/sessions"
+	"jacko/server/internal/telemetry"
 )
 
 type Authenticator interface {
@@ -24,26 +25,26 @@ type api struct {
 	auth     Authenticator
 }
 
-func New(messageService *messages.Service, auth Authenticator) http.Handler {
+func New(messageService *messages.Service, auth Authenticator, metrics *telemetry.Metrics) http.Handler {
 	api := &api{messages: messageService, auth: auth}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux.HandleFunc("POST /api/v1/channels/{channel}/messages", api.withChannel(api.send))
-	mux.HandleFunc("GET /api/v1/channels/{channel}/messages", api.withChannel(api.history))
+	mux.Handle("POST /api/v1/channels/{channel}/messages", metrics.HTTP("message_send", api.withChannel(api.send)))
+	mux.Handle("GET /api/v1/channels/{channel}/messages", metrics.HTTP("message_history", api.withChannel(api.history)))
 	return mux
 }
 
 func (a *api) withChannel(next func(http.ResponseWriter, *http.Request, int64, int64)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
-		credentials := strings.Fields(r.Header.Get("Authorization"))
-		if len(credentials) != 2 || !strings.EqualFold(credentials[0], "Bearer") {
+		token := bearerToken(r)
+		if token == "" {
 			unauthorized(w)
 			return
 		}
-		userID, err := a.auth.Authenticate(r.Context(), credentials[1])
+		userID, err := a.auth.Authenticate(r.Context(), token)
 		if errors.Is(err, sessions.ErrInvalid) {
 			unauthorized(w)
 			return
@@ -63,25 +64,12 @@ func (a *api) withChannel(next func(http.ResponseWriter, *http.Request, int64, i
 }
 
 func (a *api) send(w http.ResponseWriter, r *http.Request, userID, channelID int64) {
-	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || mediaType != "application/json" {
-		writeError(w, http.StatusUnsupportedMediaType, "expected_json")
-		return
-	}
-	// Allow for JSON escape sequences in the 8 KiB content field.
-	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
 	var body struct {
 		Nonce   string `json:"nonce"`
 		Content string `json:"content"`
 	}
-	if err := decoder.Decode(&body); err != nil {
-		invalidBody(w, err)
-		return
-	}
-	if err := decoder.Decode(new(json.RawMessage)); !errors.Is(err, io.EOF) {
-		invalidBody(w, err)
+	// Allow for JSON escape sequences in the 8 KiB content field.
+	if !readJSON(w, r, 64<<10, &body) {
 		return
 	}
 
@@ -121,6 +109,34 @@ func (a *api) history(w http.ResponseWriter, r *http.Request, userID, channelID 
 		return
 	}
 	writeJSON(w, http.StatusOK, page)
+}
+
+func bearerToken(r *http.Request) string {
+	credentials := strings.Fields(r.Header.Get("Authorization"))
+	if len(credentials) != 2 || !strings.EqualFold(credentials[0], "Bearer") {
+		return ""
+	}
+	return credentials[1]
+}
+
+func readJSON(w http.ResponseWriter, r *http.Request, limit int64, body any) bool {
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		writeError(w, http.StatusUnsupportedMediaType, "expected_json")
+		return false
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(body); err != nil {
+		invalidBody(w, err)
+		return false
+	}
+	if err := decoder.Decode(new(json.RawMessage)); !errors.Is(err, io.EOF) {
+		invalidBody(w, err)
+		return false
+	}
+	return true
 }
 
 func unauthorized(w http.ResponseWriter) {

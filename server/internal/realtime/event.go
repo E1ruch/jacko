@@ -1,6 +1,9 @@
 package realtime
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 type Event struct {
 	Version int             `json:"v"`
@@ -12,6 +15,7 @@ type Event struct {
 }
 
 type Frame struct {
-	Seq     int64
-	Payload []byte
+	Seq        int64
+	Payload    []byte
+	ReceivedAt time.Time
 }

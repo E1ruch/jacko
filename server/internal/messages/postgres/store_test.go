@@ -22,6 +22,7 @@ import (
 	"jacko/server/internal/outbox"
 	"jacko/server/internal/sessions"
 	sessionpg "jacko/server/internal/sessions/postgres"
+	"jacko/server/internal/telemetry"
 )
 
 func TestCreateTransaction(t *testing.T) {
@@ -83,6 +84,8 @@ func TestCreateTransaction(t *testing.T) {
 		ORDER BY id;
 	`)
 	applyMigration(t, ctx, pool, "000003_channel_event_cursor.up.sql")
+	applyMigration(t, ctx, pool, "000004_outbox_pending_age.up.sql")
+	applyMigration(t, ctx, pool, "000005_accounts_and_refresh.up.sql")
 
 	service := messages.NewService(postgres.NewStore(pool))
 	t.Run("CursorMigration", func(t *testing.T) {
@@ -168,6 +171,9 @@ func TestCreateTransaction(t *testing.T) {
 	t.Run("HTTP", func(t *testing.T) {
 		testHTTP(t, ctx, pool, service, sent[0].ID)
 	})
+	t.Run("Auth", func(t *testing.T) {
+		testAuth(t, ctx, pool)
+	})
 	t.Run("Realtime", func(t *testing.T) {
 		testRealtime(t, ctx, pool, service, schema)
 	})
@@ -204,7 +210,7 @@ func testHTTP(t *testing.T, ctx context.Context, pool *pgxpool.Pool, service *me
 	}
 	execSQL(t, ctx, pool, "INSERT INTO channels (guild_id, name) VALUES (1, 'empty')")
 	execSQL(t, ctx, pool, "UPDATE sessions SET revoked_at = now() WHERE user_id = 1 AND token_hash = sha256(decode(repeat('03', 32), 'hex'))")
-	handler := httpapi.New(service, sessions.NewService(sessionpg.NewStore(pool)))
+	handler := httpapi.New(service, sessions.NewService(sessionpg.NewStore(pool)), telemetry.New())
 	const route = "/api/v1/channels/1/messages"
 	member := strings.Repeat("00", 32)
 	outsider := strings.Repeat("01", 32)

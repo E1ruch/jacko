@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -14,6 +16,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	"jacko/server/internal/accounts"
+	accountpg "jacko/server/internal/accounts/postgres"
 	"jacko/server/internal/gateway"
 	"jacko/server/internal/httpapi"
 	"jacko/server/internal/messages"
@@ -22,6 +26,7 @@ import (
 	"jacko/server/internal/realtime"
 	"jacko/server/internal/sessions"
 	sessionpg "jacko/server/internal/sessions/postgres"
+	"jacko/server/internal/telemetry"
 )
 
 func main() {
@@ -56,8 +61,10 @@ func run(ctx context.Context) error {
 
 	messageService := messages.NewService(messagepg.NewStore(pool))
 	auth := sessions.NewService(sessionpg.NewStore(pool))
+	metrics := telemetry.New()
 	mux := http.NewServeMux()
-	mux.Handle("/", httpapi.New(messageService, auth))
+	mux.Handle("/", httpapi.New(messageService, auth, metrics))
+	httpapi.RegisterAuth(mux, accounts.NewService(accountpg.NewStore(pool)), auth, metrics)
 
 	if redisURL := os.Getenv("JACKO_REDIS_URL"); redisURL != "" {
 		options, err := redis.ParseURL(redisURL)
@@ -74,12 +81,14 @@ func run(ctx context.Context) error {
 			workers.Wait()
 		}()
 
-		hub := realtime.NewHub()
+		hub := realtime.NewHub(metrics)
+		metrics.ObserveQueueDepth(hub.QueuedEvents)
 		broker := realtime.NewRedis(client, os.Getenv("JACKO_REDIS_TOPIC"))
-		worker := outbox.NewWorker(pool, broker)
+		worker := outbox.NewWorker(pool, broker, metrics)
 		workers.Go(func() { broker.Run(lifetime, hub) })
 		workers.Go(func() { worker.Run(lifetime) })
-		mux.Handle("GET /api/v1/channels/{channel}/events", gateway.New(lifetime, hub, auth, outbox.NewJournal(pool)))
+		workers.Go(func() { worker.ObserveBacklog(lifetime) })
+		mux.Handle("GET /api/v1/channels/{channel}/events", gateway.New(lifetime, hub, auth, outbox.NewJournal(pool), metrics))
 	}
 
 	server := &http.Server{
@@ -90,7 +99,26 @@ func run(ctx context.Context) error {
 		WriteTimeout:      15 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	result := make(chan error, 1)
+	result := make(chan error, 2)
+	if metricsAddr := os.Getenv("JACKO_METRICS_ADDR"); metricsAddr != "" {
+		listener, err := net.Listen("tcp", metricsAddr)
+		if err != nil {
+			return fmt.Errorf("listen for metrics: %w", err)
+		}
+		metricsMux := http.NewServeMux()
+		metricsMux.Handle("GET /metrics", metrics.Handler())
+		metricsServer := &http.Server{
+			Handler:           metricsMux,
+			ReadHeaderTimeout: 3 * time.Second,
+			WriteTimeout:      5 * time.Second,
+			IdleTimeout:       30 * time.Second,
+		}
+		defer metricsServer.Close()
+		go func() {
+			slog.Info("starting metrics listener", "address", listener.Addr().String())
+			result <- metricsServer.Serve(listener)
+		}()
+	}
 	go func() {
 		slog.Info("starting API", "address", address)
 		result <- server.ListenAndServe()

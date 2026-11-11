@@ -10,6 +10,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"jacko/server/internal/telemetry"
 )
 
 const batchSize = 32
@@ -21,15 +23,17 @@ type Publisher interface {
 type Worker struct {
 	pool      *pgxpool.Pool
 	publisher Publisher
+	metrics   *telemetry.Metrics
 }
 
-func NewWorker(pool *pgxpool.Pool, publisher Publisher) *Worker {
-	return &Worker{pool: pool, publisher: publisher}
+func NewWorker(pool *pgxpool.Pool, publisher Publisher, metrics *telemetry.Metrics) *Worker {
+	return &Worker{pool: pool, publisher: publisher, metrics: metrics}
 }
 
 func (w *Worker) Run(ctx context.Context) {
 	for ctx.Err() == nil {
 		batchCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		start := time.Now()
 		count, err := w.flush(batchCtx)
 		cancel()
 
@@ -38,10 +42,16 @@ func (w *Worker) Run(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
+			w.metrics.OutboxFailures.Inc()
+			w.metrics.OutboxBatchDuration.WithLabelValues("error").Observe(time.Since(start).Seconds())
 			slog.Warn("outbox publication failed", "error", err)
 			delay = time.Second
-		} else if count == batchSize {
-			continue
+		} else if count > 0 {
+			w.metrics.OutboxPublished.Add(float64(count))
+			w.metrics.OutboxBatchDuration.WithLabelValues("ok").Observe(time.Since(start).Seconds())
+			if count == batchSize {
+				continue
+			}
 		}
 
 		select {
