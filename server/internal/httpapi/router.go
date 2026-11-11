@@ -51,8 +51,7 @@ func (a *api) withChannel(next func(http.ResponseWriter, *http.Request, int64, i
 }
 
 func withUser(auth Authenticator, next func(http.ResponseWriter, *http.Request, int64)) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
+	return restHandler(func(w http.ResponseWriter, r *http.Request) {
 		token := bearerToken(r)
 		if token == "" {
 			unauthorized(w)
@@ -68,7 +67,7 @@ func withUser(auth Authenticator, next func(http.ResponseWriter, *http.Request, 
 			return
 		}
 		next(w, r, userID)
-	}
+	})
 }
 
 func (a *api) send(w http.ResponseWriter, r *http.Request, userID, channelID int64) {
@@ -185,6 +184,10 @@ func writeMessageError(w http.ResponseWriter, err error) {
 }
 
 func internalError(w http.ResponseWriter, err error) {
+	if errors.Is(err, context.DeadlineExceeded) {
+		writeError(w, http.StatusGatewayTimeout, "request_timeout")
+		return
+	}
 	slog.Error("request failed", "error", err)
 	writeError(w, http.StatusInternalServerError, "internal_error")
 }

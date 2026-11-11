@@ -45,6 +45,8 @@ func main() {
 }
 
 func run(ctx context.Context) error {
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
 	dsn := os.Getenv("JACKO_DATABASE_URL")
 	if dsn == "" {
 		return errors.New("JACKO_DATABASE_URL is required")
@@ -69,6 +71,7 @@ func run(ctx context.Context) error {
 	auth := sessions.NewService(sessionpg.NewStore(pool))
 	metrics := telemetry.New()
 	mux := http.NewServeMux()
+	mux.Handle("GET /readyz", httpapi.Readiness(pool.Ping))
 	mux.Handle("/", httpapi.New(messageService, auth, metrics))
 	httpapi.RegisterAuth(mux, accounts.NewService(accountpg.NewStore(pool)), auth, metrics)
 	var memberPresence httpapi.MemberPresence
@@ -119,7 +122,9 @@ func run(ctx context.Context) error {
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,
 		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    16 << 10,
 	}
+	defer server.Close()
 	result := make(chan error, 2)
 	if metricsAddr := os.Getenv("JACKO_METRICS_ADDR"); metricsAddr != "" {
 		listener, err := net.Listen("tcp", metricsAddr)

@@ -39,14 +39,17 @@ func New(endpoint, region, bucket, accessKey, secretKey string) (*Objects, error
 	return &Objects{client: client, bucket: bucket}, nil
 }
 
-func (s *Objects) SignUpload(ctx context.Context, key, mediaType string, expiresAt time.Time) (string, map[string]string, error) {
+func (s *Objects) SignUpload(ctx context.Context, key, mediaType string, size int64, expiresAt time.Time) (string, map[string]string, error) {
+	if size < 1 || size > attachments.MaxBytes {
+		return "", nil, attachments.ErrInvalid
+	}
 	policy := minio.NewPostPolicy()
 	for _, err := range []error{
 		policy.SetBucket(s.bucket),
 		policy.SetKey(key),
 		policy.SetExpires(expiresAt),
 		policy.SetContentType(mediaType),
-		policy.SetContentLengthRange(1, attachments.MaxBytes),
+		policy.SetContentLengthRange(size, size),
 	} {
 		if err != nil {
 			return "", nil, storageError("create upload policy", err)

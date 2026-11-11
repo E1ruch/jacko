@@ -47,10 +47,12 @@ type Gateway struct {
 	journal  ChannelJournal
 	metrics  *telemetry.Metrics
 	presence Presence
+	slots    chan struct{}
 }
 
 func New(lifetime context.Context, hub *realtime.Hub, auth Authenticator, journal ChannelJournal, metrics *telemetry.Metrics, presence Presence) *Gateway {
-	return &Gateway{lifetime: lifetime, hub: hub, auth: auth, journal: journal, metrics: metrics, presence: presence}
+	return &Gateway{lifetime: lifetime, hub: hub, auth: auth, journal: journal, metrics: metrics, presence: presence,
+		slots: make(chan struct{}, 10_000)}
 }
 
 type identity struct {
@@ -66,6 +68,15 @@ type cursorFrame struct {
 }
 
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Count unauthenticated handshakes too, before allocating a WebSocket.
+	select {
+	case g.slots <- struct{}{}:
+		defer func() { <-g.slots }()
+	default:
+		w.Header().Set("Retry-After", "5")
+		http.Error(w, "connection capacity reached", http.StatusServiceUnavailable)
+		return
+	}
 	channelID, err := strconv.ParseInt(r.PathValue("channel"), 10, 64)
 	if err != nil || channelID <= 0 {
 		http.Error(w, "invalid channel", http.StatusBadRequest)

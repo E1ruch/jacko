@@ -1,0 +1,157 @@
+Full API verification, 2026-11-11. Go 1.26.11 darwin/arm64.
+Command: ./server/scripts/test-api.sh
+Exit status: 0 (tests, go vet, govulncheck).
+
+?   	jacko/server/cmd/api	[no test files]
+?   	jacko/server/internal/accounts	[no test files]
+?   	jacko/server/internal/accounts/postgres	[no test files]
+?   	jacko/server/internal/attachments	[no test files]
+?   	jacko/server/internal/attachments/postgres	[no test files]
+?   	jacko/server/internal/attachments/s3	[no test files]
+?   	jacko/server/internal/communities	[no test files]
+?   	jacko/server/internal/communities/postgres	[no test files]
+=== RUN   TestConnectionCapacity
+--- PASS: TestConnectionCapacity (0.00s)
+PASS
+ok  	jacko/server/internal/gateway	1.373s
+=== RUN   TestAttemptLimiter
+--- PASS: TestAttemptLimiter (0.00s)
+=== RUN   TestAuthRateLimitIgnoresForwardedHeaders
+--- PASS: TestAuthRateLimitIgnoresForwardedHeaders (0.00s)
+=== RUN   TestRESTDeadline
+--- PASS: TestRESTDeadline (0.00s)
+=== RUN   TestReadJSONBoundaries
+=== RUN   TestReadJSONBoundaries/valid
+=== RUN   TestReadJSONBoundaries/unknown_field
+=== RUN   TestReadJSONBoundaries/trailing_value
+=== RUN   TestReadJSONBoundaries/too_large
+=== RUN   TestReadJSONBoundaries/wrong_media_type
+--- PASS: TestReadJSONBoundaries (0.00s)
+    --- PASS: TestReadJSONBoundaries/valid (0.00s)
+    --- PASS: TestReadJSONBoundaries/unknown_field (0.00s)
+    --- PASS: TestReadJSONBoundaries/trailing_value (0.00s)
+    --- PASS: TestReadJSONBoundaries/too_large (0.00s)
+    --- PASS: TestReadJSONBoundaries/wrong_media_type (0.00s)
+=== RUN   TestReadiness
+--- PASS: TestReadiness (0.00s)
+PASS
+ok  	jacko/server/internal/httpapi	1.710s
+?   	jacko/server/internal/messages	[no test files]
+=== RUN   TestAttachmentsAPI
+=== RUN   TestAttachmentsAPI/InvalidImage
+=== RUN   TestAttachmentsAPI/OversizedDimensions
+=== RUN   TestAttachmentsAPI/JPEG
+=== RUN   TestAttachmentsAPI/ExpiredUpload
+--- PASS: TestAttachmentsAPI (0.15s)
+    --- PASS: TestAttachmentsAPI/InvalidImage (0.00s)
+    --- PASS: TestAttachmentsAPI/OversizedDimensions (0.01s)
+    --- PASS: TestAttachmentsAPI/JPEG (0.01s)
+    --- PASS: TestAttachmentsAPI/ExpiredUpload (0.00s)
+=== RUN   TestHistoryWithTombstones
+    history_index_test.go:64: 20,000 rows, 19,950 tombstones: history plan 0.756ms -> 0.018ms; buffer accesses 328 -> 2
+--- PASS: TestHistoryWithTombstones (0.26s)
+=== RUN   TestCommunitiesAPI
+--- PASS: TestCommunitiesAPI (0.06s)
+=== RUN   TestRequestDeadlineCancelsDatabaseWait
+--- PASS: TestRequestDeadlineCancelsDatabaseWait (0.15s)
+=== RUN   TestCreateTransaction
+=== RUN   TestCreateTransaction/CursorMigration
+=== RUN   TestCreateTransaction/HTTP
+=== RUN   TestCreateTransaction/Auth
+=== RUN   TestCreateTransaction/Realtime
+2026/11/11 19:47:06 WARN outbox publication failed error="publish outbox event 7: simulated publication failure"
+    store_test.go:188: local load: 32 sockets, 8 writers, 200 messages, 6400 deliveries in 301ms, p50=39.525ms p95=79.39ms p99=95.842ms
+--- PASS: TestCreateTransaction (5.17s)
+    --- PASS: TestCreateTransaction/CursorMigration (0.01s)
+    --- PASS: TestCreateTransaction/HTTP (0.01s)
+    --- PASS: TestCreateTransaction/Auth (3.38s)
+    --- PASS: TestCreateTransaction/Realtime (1.69s)
+PASS
+ok  	jacko/server/internal/messages/postgres	7.341s
+?   	jacko/server/internal/outbox	[no test files]
+?   	jacko/server/internal/presence	[no test files]
+?   	jacko/server/internal/realtime	[no test files]
+?   	jacko/server/internal/sessions	[no test files]
+?   	jacko/server/internal/sessions/postgres	[no test files]
+?   	jacko/server/internal/telemetry	[no test files]
+No vulnerabilities found.
+
+Baseline load, Go 1.26.11, without -race, count=3:
+=== RUN   TestCreateTransaction
+=== RUN   TestCreateTransaction/CursorMigration
+=== RUN   TestCreateTransaction/HTTP
+=== RUN   TestCreateTransaction/Auth
+=== RUN   TestCreateTransaction/Realtime
+2026/11/11 19:47:53 WARN outbox publication failed error="publish outbox event 7: simulated publication failure"
+    store_test.go:187: local load: 32 sockets, 8 writers, 200 messages, 6400 deliveries in 216ms, p50=30.331ms p95=47.238ms p99=54.621ms
+--- PASS: TestCreateTransaction (2.08s)
+    --- PASS: TestCreateTransaction/CursorMigration (0.01s)
+    --- PASS: TestCreateTransaction/HTTP (0.01s)
+    --- PASS: TestCreateTransaction/Auth (0.41s)
+    --- PASS: TestCreateTransaction/Realtime (1.59s)
+=== RUN   TestCreateTransaction
+=== RUN   TestCreateTransaction/CursorMigration
+=== RUN   TestCreateTransaction/HTTP
+=== RUN   TestCreateTransaction/Auth
+=== RUN   TestCreateTransaction/Realtime
+2026/11/11 19:47:55 WARN outbox publication failed error="publish outbox event 7: simulated publication failure"
+    store_test.go:187: local load: 32 sockets, 8 writers, 200 messages, 6400 deliveries in 220ms, p50=30.14ms p95=45.683ms p99=58.806ms
+--- PASS: TestCreateTransaction (1.99s)
+    --- PASS: TestCreateTransaction/CursorMigration (0.01s)
+    --- PASS: TestCreateTransaction/HTTP (0.01s)
+    --- PASS: TestCreateTransaction/Auth (0.38s)
+    --- PASS: TestCreateTransaction/Realtime (1.55s)
+=== RUN   TestCreateTransaction
+=== RUN   TestCreateTransaction/CursorMigration
+=== RUN   TestCreateTransaction/HTTP
+=== RUN   TestCreateTransaction/Auth
+=== RUN   TestCreateTransaction/Realtime
+2026/11/11 19:47:57 WARN outbox publication failed error="publish outbox event 7: simulated publication failure"
+    store_test.go:187: local load: 32 sockets, 8 writers, 200 messages, 6400 deliveries in 215ms, p50=30.551ms p95=45.831ms p99=57.516ms
+--- PASS: TestCreateTransaction (2.00s)
+    --- PASS: TestCreateTransaction/CursorMigration (0.01s)
+    --- PASS: TestCreateTransaction/HTTP (0.01s)
+    --- PASS: TestCreateTransaction/Auth (0.38s)
+    --- PASS: TestCreateTransaction/Realtime (1.57s)
+PASS
+ok  	jacko/server/internal/messages/postgres	6.524s
+
+Updated load, Go 1.26.11, without -race, count=3:
+=== RUN   TestCreateTransaction
+=== RUN   TestCreateTransaction/CursorMigration
+=== RUN   TestCreateTransaction/HTTP
+=== RUN   TestCreateTransaction/Auth
+=== RUN   TestCreateTransaction/Realtime
+2026/11/11 19:48:49 WARN outbox publication failed error="publish outbox event 7: simulated publication failure"
+    store_test.go:188: local load: 32 sockets, 8 writers, 200 messages, 6400 deliveries in 229ms, p50=31.564ms p95=47.149ms p99=57.002ms
+--- PASS: TestCreateTransaction (2.07s)
+    --- PASS: TestCreateTransaction/CursorMigration (0.01s)
+    --- PASS: TestCreateTransaction/HTTP (0.01s)
+    --- PASS: TestCreateTransaction/Auth (0.40s)
+    --- PASS: TestCreateTransaction/Realtime (1.60s)
+=== RUN   TestCreateTransaction
+=== RUN   TestCreateTransaction/CursorMigration
+=== RUN   TestCreateTransaction/HTTP
+=== RUN   TestCreateTransaction/Auth
+=== RUN   TestCreateTransaction/Realtime
+2026/11/11 19:48:51 WARN outbox publication failed error="publish outbox event 7: simulated publication failure"
+    store_test.go:188: local load: 32 sockets, 8 writers, 200 messages, 6400 deliveries in 222ms, p50=30.659ms p95=46.601ms p99=54.688ms
+--- PASS: TestCreateTransaction (2.04s)
+    --- PASS: TestCreateTransaction/CursorMigration (0.01s)
+    --- PASS: TestCreateTransaction/HTTP (0.01s)
+    --- PASS: TestCreateTransaction/Auth (0.40s)
+    --- PASS: TestCreateTransaction/Realtime (1.59s)
+=== RUN   TestCreateTransaction
+=== RUN   TestCreateTransaction/CursorMigration
+=== RUN   TestCreateTransaction/HTTP
+=== RUN   TestCreateTransaction/Auth
+=== RUN   TestCreateTransaction/Realtime
+2026/11/11 19:48:53 WARN outbox publication failed error="publish outbox event 7: simulated publication failure"
+    store_test.go:188: local load: 32 sockets, 8 writers, 200 messages, 6400 deliveries in 223ms, p50=30.692ms p95=46.429ms p99=55.346ms
+--- PASS: TestCreateTransaction (2.02s)
+    --- PASS: TestCreateTransaction/CursorMigration (0.01s)
+    --- PASS: TestCreateTransaction/HTTP (0.01s)
+    --- PASS: TestCreateTransaction/Auth (0.38s)
+    --- PASS: TestCreateTransaction/Realtime (1.59s)
+PASS
+ok  	jacko/server/internal/messages/postgres	6.612s

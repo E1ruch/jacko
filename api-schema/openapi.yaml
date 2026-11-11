@@ -2,7 +2,10 @@ openapi: 3.0.3
 info:
   title: Jacko API
   version: 0.1.0
-  description: HTTP contract for the implemented account, session, community, messaging and attachment operations.
+  description: >-
+    HTTP contract for the implemented account, session, community, messaging and attachment operations.
+    REST requests have a 10-second dependency deadline; an expired operation can return
+    504 with code request_timeout. Private responses use Cache-Control no-store.
 servers:
   - url: /api/v1
 security:
@@ -21,6 +24,8 @@ paths:
           $ref: '#/components/responses/Error'
         '409':
           $ref: '#/components/responses/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
         default:
           $ref: '#/components/responses/Error'
   /auth/login:
@@ -32,6 +37,8 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/Tokens'
+        '429':
+          $ref: '#/components/responses/RateLimited'
         default:
           $ref: '#/components/responses/Error'
   /auth/refresh:
@@ -52,6 +59,8 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/Tokens'
+        '429':
+          $ref: '#/components/responses/RateLimited'
         default:
           $ref: '#/components/responses/Error'
   /auth/session:
@@ -459,6 +468,25 @@ components:
                 maxLength: 256
                 description: Registration requires at least 12 characters. All operations cap passwords at 256 UTF-8 bytes.
   responses:
+    RateLimited:
+      description: >-
+        Too many authentication attempts from the connection peer on this process.
+        Login and registration share a burst of 10, refilling one request every 6 seconds.
+        Refresh has a separate burst of 60, refilling one request per second.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds to wait before retrying.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [code]
+            properties:
+              code:
+                type: string
+                enum: [rate_limited]
     UserID:
       description: User identifier.
       content:

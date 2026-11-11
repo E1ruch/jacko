@@ -89,6 +89,7 @@ func TestCreateTransaction(t *testing.T) {
 	applyMigration(t, ctx, pool, "000006_communities.up.sql")
 	applyMigration(t, ctx, pool, "000007_message_lifecycle.up.sql")
 	applyMigration(t, ctx, pool, "000008_image_attachments.up.sql")
+	applyMigration(t, ctx, pool, "000009_live_history_index.up.sql")
 
 	service := messages.NewService(postgres.NewStore(pool))
 	t.Run("CursorMigration", func(t *testing.T) {

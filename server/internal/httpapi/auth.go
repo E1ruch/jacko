@@ -3,6 +3,7 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"jacko/server/internal/accounts"
 	"jacko/server/internal/sessions"
@@ -16,18 +17,17 @@ type authAPI struct {
 
 func RegisterAuth(mux *http.ServeMux, accountService *accounts.Service, sessionService *sessions.Service, metrics *telemetry.Metrics) {
 	auth := authAPI{accounts: accountService, sessions: sessionService}
-	mux.Handle("POST /api/v1/auth/register", authRoute(metrics, "auth_register", auth.register))
-	mux.Handle("POST /api/v1/auth/login", authRoute(metrics, "auth_login", auth.login))
-	mux.Handle("POST /api/v1/auth/refresh", authRoute(metrics, "auth_refresh", auth.refresh))
+	passwordAttempts := newAttemptLimiter(10, 6*time.Second)
+	refreshAttempts := newAttemptLimiter(60, time.Second)
+	mux.Handle("POST /api/v1/auth/register", authRoute(metrics, "auth_register", passwordAttempts.wrap(auth.register)))
+	mux.Handle("POST /api/v1/auth/login", authRoute(metrics, "auth_login", passwordAttempts.wrap(auth.login)))
+	mux.Handle("POST /api/v1/auth/refresh", authRoute(metrics, "auth_refresh", refreshAttempts.wrap(auth.refresh)))
 	mux.Handle("GET /api/v1/auth/session", authRoute(metrics, "auth_session", auth.session))
 	mux.Handle("DELETE /api/v1/auth/session", authRoute(metrics, "auth_logout", auth.logout))
 }
 
 func authRoute(metrics *telemetry.Metrics, name string, handler http.HandlerFunc) http.Handler {
-	return metrics.HTTP(name, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
-		handler(w, r)
-	}))
+	return metrics.HTTP(name, restHandler(handler))
 }
 
 type credentials struct {

@@ -62,7 +62,7 @@ type Store interface {
 }
 
 type Objects interface {
-	SignUpload(ctx context.Context, key, mediaType string, expiresAt time.Time) (string, map[string]string, error)
+	SignUpload(ctx context.Context, key, mediaType string, size int64, expiresAt time.Time) (string, map[string]string, error)
 	ReadUpload(ctx context.Context, key string, expectedSize int64) ([]byte, error)
 	Save(ctx context.Context, key, mediaType string, data []byte) error
 	Remove(ctx context.Context, key string)
@@ -107,7 +107,7 @@ func (s *Service) Begin(ctx context.Context, userID, channelID int64, mediaType 
 	if err := s.store.Reserve(ctx, userID, channelID, upload); err != nil {
 		return UploadForm{}, err
 	}
-	url, fields, err := s.objects.SignUpload(ctx, "uploads/"+id, mediaType, expires)
+	url, fields, err := s.objects.SignUpload(ctx, "uploads/"+id, mediaType, size, expires)
 	if err != nil {
 		return UploadForm{}, err
 	}
