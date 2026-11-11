@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: Jacko API
   version: 0.1.0
-  description: HTTP contract for the implemented account, session, community and messaging operations.
+  description: HTTP contract for the implemented account, session, community, messaging and attachment operations.
 servers:
   - url: /api/v1
 security:
@@ -109,7 +109,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [nonce, content]
+              required: [nonce]
               properties:
                 nonce:
                   type: string
@@ -118,9 +118,10 @@ paths:
                   maxLength: 64
                 content:
                   type: string
-                  description: Message text. At most 8192 UTF-8 bytes.
-                  minLength: 1
+                  description: Message text. Required for text-only messages. At most 8192 UTF-8 bytes.
                   maxLength: 8192
+                attachment_id:
+                  $ref: '#/components/schemas/AttachmentID'
                 reply_to:
                   $ref: '#/components/schemas/ID'
       responses:
@@ -158,8 +159,7 @@ paths:
               properties:
                 content:
                   type: string
-                  description: Updated text. At most 8192 UTF-8 bytes.
-                  minLength: 1
+                  description: Updated text. An empty caption is allowed on an image message. At most 8192 UTF-8 bytes.
                   maxLength: 8192
       responses:
         '200':
@@ -292,12 +292,108 @@ paths:
           $ref: '#/components/responses/Error'
         default:
           $ref: '#/components/responses/Error'
+  /channels/{channel}/attachments:
+    parameters:
+      - name: channel
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/ID'
+    post:
+      operationId: beginImageUpload
+      description: Request a short-lived S3 form for a JPEG or PNG image.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [media_type, size_bytes]
+              properties:
+                media_type:
+                  type: string
+                  enum: [image/jpeg, image/png]
+                size_bytes:
+                  type: integer
+                  minimum: 1
+                  maximum: 8388608
+      responses:
+        '201':
+          description: Submit all fields and the image as the last file field in a multipart POST to url.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, url, fields, expires_at]
+                properties:
+                  id:
+                    $ref: '#/components/schemas/AttachmentID'
+                  url:
+                    type: string
+                    format: uri
+                  fields:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  expires_at:
+                    type: string
+                    format: date-time
+        default:
+          $ref: '#/components/responses/Error'
+  /attachments/{attachment}/complete:
+    parameters:
+      - $ref: '#/components/parameters/Attachment'
+    post:
+      operationId: completeImageUpload
+      description: Verify and seal an uploaded image. Only its uploader can complete it.
+      responses:
+        '200':
+          description: Verified image metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImageAttachment'
+        '422':
+          $ref: '#/components/responses/Error'
+        default:
+          $ref: '#/components/responses/Error'
+  /attachments/{attachment}:
+    parameters:
+      - $ref: '#/components/parameters/Attachment'
+    get:
+      operationId: getImageAttachment
+      description: Return a 60-second download URL for an attachment on a visible message.
+      responses:
+        '200':
+          description: Verified image metadata and signed download URL.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ImageAttachment'
+                  - type: object
+                    required: [url]
+                    properties:
+                      url:
+                        type: string
+                        format: uri
+        '404':
+          $ref: '#/components/responses/Error'
+        default:
+          $ref: '#/components/responses/Error'
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
   parameters:
+    Attachment:
+      name: attachment
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/AttachmentID'
     Guild:
       name: guild
       in: path
@@ -371,6 +467,24 @@ components:
               code:
                 type: string
   schemas:
+    AttachmentID:
+      type: string
+      pattern: '^[0-9a-f]{32}$'
+    ImageAttachment:
+      type: object
+      required: [id, media_type, size_bytes, width, height]
+      properties:
+        id:
+          $ref: '#/components/schemas/AttachmentID'
+        media_type:
+          type: string
+          enum: [image/jpeg, image/png]
+        size_bytes:
+          type: integer
+        width:
+          type: integer
+        height:
+          type: integer
     Guild:
       type: object
       required: [id, name]
@@ -449,6 +563,8 @@ components:
         created_at:
           type: string
           format: date-time
+        attachment_id:
+          $ref: '#/components/schemas/AttachmentID'
         reply_to:
           $ref: '#/components/schemas/ID'
         edited_at:

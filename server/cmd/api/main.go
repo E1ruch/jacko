@@ -18,6 +18,9 @@ import (
 
 	"jacko/server/internal/accounts"
 	accountpg "jacko/server/internal/accounts/postgres"
+	"jacko/server/internal/attachments"
+	attachmentpg "jacko/server/internal/attachments/postgres"
+	attachments3 "jacko/server/internal/attachments/s3"
 	"jacko/server/internal/communities"
 	communitypg "jacko/server/internal/communities/postgres"
 	"jacko/server/internal/gateway"
@@ -68,6 +71,15 @@ func run(ctx context.Context) error {
 	mux.Handle("/", httpapi.New(messageService, auth, metrics))
 	httpapi.RegisterAuth(mux, accounts.NewService(accountpg.NewStore(pool)), auth, metrics)
 	httpapi.RegisterCommunities(mux, communities.NewService(communitypg.NewStore(pool)), auth, metrics)
+
+	if endpoint := os.Getenv("JACKO_S3_URL"); endpoint != "" {
+		objects, err := attachments3.New(endpoint, os.Getenv("JACKO_S3_REGION"), os.Getenv("JACKO_S3_BUCKET"),
+			os.Getenv("JACKO_S3_ACCESS_KEY"), os.Getenv("JACKO_S3_SECRET_KEY"))
+		if err != nil {
+			return err
+		}
+		httpapi.RegisterAttachments(mux, attachments.NewService(attachmentpg.NewStore(pool), objects), auth, metrics)
+	}
 
 	if redisURL := os.Getenv("JACKO_REDIS_URL"); redisURL != "" {
 		options, err := redis.ParseURL(redisURL)

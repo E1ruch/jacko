@@ -7,33 +7,38 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"jacko/server/internal/attachments"
 )
 
 var (
-	ErrMessageNotFound = errors.New("message unavailable")
-	ErrReplyNotFound   = errors.New("reply target unavailable")
-	ErrInvalidSend     = errors.New("invalid message")
-	ErrChannelAccess   = errors.New("channel is unavailable to the author")
-	ErrNonceConflict   = errors.New("nonce already used for a different message")
+	ErrAttachmentNotFound = errors.New("attachment unavailable or already in use")
+	ErrMessageNotFound    = errors.New("message unavailable")
+	ErrReplyNotFound      = errors.New("reply target unavailable")
+	ErrInvalidSend        = errors.New("invalid message")
+	ErrChannelAccess      = errors.New("channel is unavailable to the author")
+	ErrNonceConflict      = errors.New("nonce already used for a different message")
 )
 
 type SendCommand struct {
 	// AuthorID must come from the authenticated session at the transport boundary.
-	AuthorID  int64
-	ChannelID int64
-	Nonce     string
-	Content   string
-	ReplyTo   *int64
+	AuthorID     int64
+	ChannelID    int64
+	Nonce        string
+	Content      string
+	ReplyTo      *int64
+	AttachmentID *string
 }
 
 type Message struct {
-	ID        int64      `json:"id,string"`
-	ChannelID int64      `json:"channel_id,string"`
-	AuthorID  int64      `json:"author_id,string"`
-	Content   string     `json:"content"`
-	CreatedAt time.Time  `json:"created_at"`
-	ReplyTo   *int64     `json:"reply_to,string,omitempty"`
-	EditedAt  *time.Time `json:"edited_at,omitempty"`
+	ID           int64      `json:"id,string"`
+	ChannelID    int64      `json:"channel_id,string"`
+	AuthorID     int64      `json:"author_id,string"`
+	Content      string     `json:"content"`
+	CreatedAt    time.Time  `json:"created_at"`
+	ReplyTo      *int64     `json:"reply_to,string,omitempty"`
+	EditedAt     *time.Time `json:"edited_at,omitempty"`
+	AttachmentID *string    `json:"attachment_id,omitempty"`
 }
 
 // Store applies channel membership checks to reads and writes.
@@ -55,7 +60,9 @@ func NewService(store Store) *Service {
 
 func (s *Service) Send(ctx context.Context, command SendCommand) (Message, error) {
 	if command.AuthorID <= 0 || command.ChannelID <= 0 ||
-		!validText(command.Nonce, 64) || !validText(command.Content, 8192) ||
+		!validText(command.Nonce, 64) ||
+		(!validText(command.Content, 8192) && (command.Content != "" || command.AttachmentID == nil)) ||
+		(command.AttachmentID != nil && !attachments.ValidID(*command.AttachmentID)) ||
 		(command.ReplyTo != nil && *command.ReplyTo <= 0) {
 		return Message{}, ErrInvalidSend
 	}
@@ -116,7 +123,7 @@ type DeletedMessage struct {
 }
 
 func (s *Service) Edit(ctx context.Context, target OwnedMessage, content string) (Message, error) {
-	if target.UserID <= 0 || target.ChannelID <= 0 || target.MessageID <= 0 || !validText(content, 8192) {
+	if target.UserID <= 0 || target.ChannelID <= 0 || target.MessageID <= 0 || (content != "" && !validText(content, 8192)) {
 		return Message{}, ErrInvalidSend
 	}
 	return s.store.Edit(ctx, target, content)

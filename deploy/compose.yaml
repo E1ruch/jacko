@@ -25,5 +25,17 @@ services:
       timeout: 3s
       retries: 15
 
+  s3:
+    image: chrislusf/seaweedfs:4.53
+    environment:
+      AWS_ACCESS_KEY_ID: jacko-local
+      AWS_SECRET_ACCESS_KEY: jacko-local-storage
+      S3_BUCKET: jacko
+    ports:
+      - "127.0.0.1:9000:8333"
+    volumes:
+      - s3-data:/data
+
 volumes:
+  s3-data:
   postgres-data:

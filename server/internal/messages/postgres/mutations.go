@@ -22,13 +22,16 @@ func (s *Store) Edit(ctx context.Context, target messages.OwnedMessage, content 
 		if deletedAt != nil {
 			return messages.ErrMessageNotFound
 		}
+		if content == "" && current.AttachmentID == nil {
+			return messages.ErrInvalidSend
+		}
 		if current.Content == content {
 			message = current
 			return nil
 		}
 		err = scanMessage(tx.QueryRow(ctx, `
 			UPDATE messages SET content = $2, edited_at = clock_timestamp() WHERE id = $1
-			RETURNING id, channel_id, author_id, content, created_at, reply_to, edited_at
+			RETURNING id, channel_id, author_id, content, created_at, reply_to, edited_at, attachment_id
 		`, target.MessageID, content), &message)
 		if err != nil {
 			return fmt.Errorf("edit message: %w", err)
@@ -81,7 +84,7 @@ func lockOwnedMessage(ctx context.Context, tx pgx.Tx, target messages.OwnedMessa
 	var deletedAt *time.Time
 	fields := append(messageFields(&message), &deletedAt)
 	err := tx.QueryRow(ctx, `
-		SELECT id, channel_id, author_id, coalesce(content, ''), created_at, reply_to, edited_at, deleted_at
+		SELECT id, channel_id, author_id, coalesce(content, ''), created_at, reply_to, edited_at, attachment_id, deleted_at
 		FROM messages WHERE id = $1 AND channel_id = $2 AND author_id = $3
 		FOR UPDATE
 	`, target.MessageID, target.ChannelID, target.UserID).Scan(fields...)

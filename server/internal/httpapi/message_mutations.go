@@ -13,12 +13,16 @@ func (a *api) edit(w http.ResponseWriter, r *http.Request, userID, channelID int
 		return
 	}
 	var body struct {
-		Content string `json:"content"`
+		Content *string `json:"content"`
 	}
 	if !readJSON(w, r, 64<<10, &body) {
 		return
 	}
-	message, err := a.messages.Edit(r.Context(), target, body.Content)
+	if body.Content == nil {
+		writeMessageError(w, messages.ErrInvalidSend)
+		return
+	}
+	message, err := a.messages.Edit(r.Context(), target, *body.Content)
 	if err != nil {
 		writeMessageError(w, err)
 		return
