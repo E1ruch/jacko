@@ -76,9 +76,25 @@ func (l *attemptLimiter) allow(address netip.Addr, now time.Time) bool {
 }
 
 func (l *attemptLimiter) wrap(next http.HandlerFunc) http.HandlerFunc {
+	return l.wrapShared(nil, "", next)
+}
+
+func (l *attemptLimiter) wrapShared(shared RateLimiter, scope string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		peer, err := netip.ParseAddrPort(r.RemoteAddr)
-		if err != nil || !l.allow(peer.Addr().Unmap(), time.Now()) {
+		allowed := false
+		if err == nil {
+			address := peer.Addr().Unmap()
+			if shared != nil {
+				ctx, cancel := context.WithTimeout(r.Context(), 200*time.Millisecond)
+				allowed, err = shared.Allow(ctx, scope, address, int(l.burst), l.interval)
+				cancel()
+			}
+			if shared == nil || err != nil {
+				allowed = l.allow(address, time.Now())
+			}
+		}
+		if !allowed {
 			// Covers both an exhausted bucket and a full limiter table.
 			w.Header().Set("Retry-After", "60")
 			writeError(w, http.StatusTooManyRequests, "rate_limited")

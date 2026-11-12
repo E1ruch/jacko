@@ -21,14 +21,18 @@ var (
 )
 
 type Credential struct {
-	UserID int64
-	Salt   [16]byte
-	Hash   [32]byte
+	UserID          int64
+	PasswordVersion int64
+	EmailVerified   bool
+	Salt            [16]byte
+	Hash            [32]byte
 }
 
 type Store interface {
 	Create(ctx context.Context, email string, credential Credential) (int64, error)
 	Find(ctx context.Context, email string) (Credential, error)
+	SaveCode(ctx context.Context, email string, purpose Purpose, hash [32]byte) (bool, error)
+	ConsumeCode(ctx context.Context, purpose Purpose, hash [32]byte, credential Credential) error
 }
 
 type Service struct {
@@ -56,25 +60,25 @@ func (s *Service) Register(ctx context.Context, email, password string) (int64, 
 	return s.store.Create(ctx, email, credential)
 }
 
-func (s *Service) Verify(ctx context.Context, email, password string) (int64, error) {
+func (s *Service) Verify(ctx context.Context, email, password string) (Credential, error) {
 	email, valid := normalizeEmail(email)
 	if !valid || !validPassword(password) {
-		return 0, ErrInvalidCredentials
+		return Credential{}, ErrInvalidCredentials
 	}
 	credential, err := s.store.Find(ctx, email)
 	if err != nil && !errors.Is(err, ErrInvalidCredentials) {
-		return 0, err
+		return Credential{}, err
 	}
 
 	// Unknown accounts still incur the same Argon2id work as incorrect passwords.
 	candidate, deriveErr := s.derive(ctx, password, credential.Salt)
 	if deriveErr != nil {
-		return 0, deriveErr
+		return Credential{}, deriveErr
 	}
 	if subtle.ConstantTimeCompare(candidate, credential.Hash[:]) != 1 || err != nil {
-		return 0, ErrInvalidCredentials
+		return Credential{}, ErrInvalidCredentials
 	}
-	return credential.UserID, nil
+	return credential, nil
 }
 
 func (s *Service) derive(ctx context.Context, password string, salt [16]byte) ([]byte, error) {

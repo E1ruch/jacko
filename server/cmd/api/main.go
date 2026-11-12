@@ -18,6 +18,7 @@ import (
 
 	"jacko/server/internal/accounts"
 	accountpg "jacko/server/internal/accounts/postgres"
+	accountmail "jacko/server/internal/accounts/smtp"
 	"jacko/server/internal/attachments"
 	attachmentpg "jacko/server/internal/attachments/postgres"
 	attachments3 "jacko/server/internal/attachments/s3"
@@ -27,6 +28,7 @@ import (
 	"jacko/server/internal/httpapi"
 	"jacko/server/internal/messages"
 	messagepg "jacko/server/internal/messages/postgres"
+	"jacko/server/internal/moderation"
 	"jacko/server/internal/outbox"
 	"jacko/server/internal/presence"
 	"jacko/server/internal/realtime"
@@ -68,12 +70,27 @@ func run(ctx context.Context) error {
 	}
 
 	messageService := messages.NewService(messagepg.NewStore(pool))
-	auth := sessions.NewService(sessionpg.NewStore(pool))
+	accountService := accounts.NewService(accountpg.NewStore(pool))
+	sessionStore := sessionpg.NewStore(pool)
+	var delivery *accounts.Delivery
+	if address := os.Getenv("JACKO_SMTP_ADDR"); address != "" {
+		mailer, err := accountmail.New(address, os.Getenv("JACKO_SMTP_FROM"), os.Getenv("JACKO_SMTP_USER"), os.Getenv("JACKO_SMTP_PASSWORD"))
+		if err != nil {
+			return err
+		}
+		delivery = accounts.NewDelivery(accountService, mailer)
+		sessionStore = sessionpg.NewVerifiedStore(pool)
+		mailCtx, stopMail := context.WithCancel(ctx)
+		var mailWorker sync.WaitGroup
+		mailWorker.Go(func() { delivery.Run(mailCtx) })
+		defer func() { stopMail(); mailWorker.Wait() }()
+	}
+	auth := sessions.NewService(sessionStore)
 	metrics := telemetry.New()
 	mux := http.NewServeMux()
 	mux.Handle("GET /readyz", httpapi.Readiness(pool.Ping))
 	mux.Handle("/", httpapi.New(messageService, auth, metrics))
-	httpapi.RegisterAuth(mux, accounts.NewService(accountpg.NewStore(pool)), auth, metrics)
+	var authLimits httpapi.RateLimiter
 	var memberPresence httpapi.MemberPresence
 
 	if endpoint := os.Getenv("JACKO_S3_URL"); endpoint != "" {
@@ -103,6 +120,7 @@ func run(ctx context.Context) error {
 		hub := realtime.NewHub(metrics)
 		metrics.ObserveQueueDepth(hub.QueuedEvents)
 		topic := os.Getenv("JACKO_REDIS_TOPIC")
+		authLimits = httpapi.NewRedisLimits(client, topic)
 		broker := realtime.NewRedis(client, topic)
 		tracker := presence.NewRedis(client, topic)
 		memberPresence = tracker
@@ -113,6 +131,8 @@ func run(ctx context.Context) error {
 		mux.Handle("GET /api/v1/channels/{channel}/events", gateway.New(lifetime, hub, auth, outbox.NewJournal(pool), metrics, tracker))
 	}
 
+	httpapi.RegisterAuthWithOptions(mux, accountService, auth, metrics, authLimits, delivery)
+	httpapi.RegisterModeration(mux, moderation.NewStore(pool), auth, metrics, authLimits)
 	httpapi.RegisterCommunities(mux, communities.NewService(communitypg.NewStore(pool)), auth, memberPresence, metrics)
 
 	server := &http.Server{

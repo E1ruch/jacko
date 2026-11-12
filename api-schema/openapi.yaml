@@ -410,6 +410,147 @@ paths:
           $ref: '#/components/responses/Error'
         default:
           $ref: '#/components/responses/Error'
+  /auth/email/resend:
+    post:
+      operationId: resendEmailVerification
+      security: []
+      requestBody:
+        $ref: '#/components/requestBodies/Email'
+      responses:
+        '202':
+          description: Request accepted without disclosing whether the account exists.
+        default:
+          $ref: '#/components/responses/Error'
+  /auth/email/verify:
+    post:
+      operationId: verifyEmail
+      security: []
+      requestBody:
+        $ref: '#/components/requestBodies/AccountCode'
+      responses:
+        '204':
+          description: Email verified.
+        default:
+          $ref: '#/components/responses/Error'
+  /auth/password/forgot:
+    post:
+      operationId: requestPasswordReset
+      security: []
+      requestBody:
+        $ref: '#/components/requestBodies/Email'
+      responses:
+        '202':
+          description: Request accepted without disclosing whether the account exists.
+        default:
+          $ref: '#/components/responses/Error'
+  /auth/password/reset:
+    post:
+      operationId: resetPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [code, password]
+              properties:
+                code:
+                  $ref: '#/components/schemas/Token'
+                password:
+                  type: string
+                  format: password
+                  minLength: 12
+                  maxLength: 256
+      responses:
+        '204':
+          description: Password changed and all previous sessions revoked.
+        default:
+          $ref: '#/components/responses/Error'
+  /channels/{channel}/messages/{message}/reports:
+    parameters:
+      - name: channel
+        in: path
+        required: true
+        schema: {$ref: '#/components/schemas/ID'}
+      - name: message
+        in: path
+        required: true
+        schema: {$ref: '#/components/schemas/ID'}
+    post:
+      operationId: createMessageReport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 1000
+                  description: At most 1000 UTF-8 bytes.
+      responses:
+        '204':
+          description: Report recorded. A duplicate by the same member leaves the original report intact.
+        default:
+          $ref: '#/components/responses/Error'
+  /guilds/{guild}/reports:
+    parameters:
+      - $ref: '#/components/parameters/Guild'
+    get:
+      operationId: listGuildReports
+      description: Available to the community owner.
+      parameters:
+        - $ref: '#/components/parameters/After'
+      responses:
+        '200':
+          description: Reports in ascending ID order.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MessageReport'
+                  next_after:
+                    $ref: '#/components/schemas/ID'
+        default:
+          $ref: '#/components/responses/Error'
+  /guilds/{guild}/reports/{report}:
+    parameters:
+      - $ref: '#/components/parameters/Guild'
+      - name: report
+        in: path
+        required: true
+        schema: {$ref: '#/components/schemas/ID'}
+    patch:
+      operationId: resolveGuildReport
+      description: Available to the community owner.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [resolution]
+              properties:
+                resolution:
+                  type: string
+                  enum: [reviewed, dismissed]
+      responses:
+        '204':
+          description: Review outcome recorded.
+        default:
+          $ref: '#/components/responses/Error'
 components:
   securitySchemes:
     bearerAuth:
@@ -435,6 +576,29 @@ components:
       schema:
         $ref: '#/components/schemas/ID'
   requestBodies:
+    Email:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [email]
+            properties:
+              email:
+                type: string
+                format: email
+    AccountCode:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [code]
+            properties:
+              code:
+                $ref: '#/components/schemas/Token'
     Name:
       required: true
       content:
@@ -514,6 +678,26 @@ components:
               code:
                 type: string
   schemas:
+    MessageReport:
+      type: object
+      required: [id, channel_id, message_id, reporter_id, reason, created_at]
+      properties:
+        id: {$ref: '#/components/schemas/ID'}
+        channel_id: {$ref: '#/components/schemas/ID'}
+        message_id: {$ref: '#/components/schemas/ID'}
+        reporter_id: {$ref: '#/components/schemas/ID'}
+        reason:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        resolution:
+          type: string
+          enum: [reviewed, dismissed]
+        resolved_at:
+          type: string
+          format: date-time
+        resolved_by: {$ref: '#/components/schemas/ID'}
     AttachmentID:
       type: string
       pattern: '^[0-9a-f]{32}$'

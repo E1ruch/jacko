@@ -13,7 +13,7 @@ var ErrInvalid = errors.New("invalid session")
 
 type Store interface {
 	FindActiveUser(ctx context.Context, tokenHash [sha256.Size]byte) (int64, error)
-	Create(ctx context.Context, userID int64, access, refresh [sha256.Size]byte) (time.Time, time.Time, error)
+	Create(ctx context.Context, userID, passwordVersion int64, access, refresh [sha256.Size]byte) (time.Time, time.Time, error)
 	Rotate(ctx context.Context, oldRefresh, access, refresh [sha256.Size]byte) (int64, time.Time, time.Time, error)
 	Revoke(ctx context.Context, access [sha256.Size]byte) error
 }
@@ -43,9 +43,13 @@ func (s *Service) Authenticate(ctx context.Context, token string) (int64, error)
 }
 
 func (s *Service) Issue(ctx context.Context, userID int64) (Tokens, error) {
+	return s.IssueForPassword(ctx, userID, 0)
+}
+
+func (s *Service) IssueForPassword(ctx context.Context, userID, passwordVersion int64) (Tokens, error) {
 	access, accessHash := newToken()
 	refresh, refreshHash := newToken()
-	expires, refreshExpires, err := s.store.Create(ctx, userID, accessHash, refreshHash)
+	expires, refreshExpires, err := s.store.Create(ctx, userID, passwordVersion, accessHash, refreshHash)
 	if err != nil {
 		return Tokens{}, err
 	}
